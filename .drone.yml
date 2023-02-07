@@ -1,1 +1,120 @@
-test
+---
+################
+# Build & Test #
+################
+
+kind: pipeline
+name: run_tests
+
+steps:
+  # Run tests against React client app (with Jest)
+  - name: client_test
+    image: node:11.6.0-alpine
+    commands:
+      - cd services/client
+      # Install dependencies (which will be cached)
+      - yarn
+      # Run tests in CI mode (i.e., don't start file watcher after tests complete)
+      - CI=true yarn test
+    volumes:
+      # Link node_modules cache from host filesystem into container at the expected location
+      - name: node_cache
+        path: /drone/src/services/client/node_modules
+
+  # Run tests against Python/Flask engine backend (with pytest)
+  - name: engine_test
+    image: python:3.7.2
+    commands:
+      - cd services/game
+      # Install dependencies
+      - pip install -r requirements.txt
+      # Start with a fresh database (which is already running as a service from Drone)
+      - python manage.py recreate_db
+      # Start the Flask server
+      - gunicorn manage:app --daemon
+      # Run tests against the Flask app
+      - python manage.py test
+    environment:
+      FLASK_ENV: production
+      APP_SETTINGS: project.config.TestingConfig
+      # `gamedb` below is the name of the service database that Drone is managing
+      DATABASE_TEST_URL: postgres://postgres:postgres@gamedb:5432/game_test
+    volumes:
+      # Mount pip cache from host
+      - name: pip_cache
+        path: /root/.cache/pip
+
+  # Run tests against full stack (with Cypress)
+  - name: e2e_test
+    image: docker/compose:1.24.0
+    environment:
+      APP_TEST_URL: http://localhost
+      APP_TEST_PORT: 8001
+    commands:
+      # Build the whole app stack and start containers
+      - docker-compose -f docker-compose-staging.yml up --build -d
+      # Build the Cypress container and copy in test specs
+      - docker build -t cypress:staging -f ./staging/Dockerfile-cypress ./cypress
+      # Recreate database tables on the app database
+      - docker-compose -f docker-compose-staging.yml exec -T game python manage.py recreate_db
+      # Run Cypress (on same network as the app, not the Cypress container internal network)
+      # I found Cypress needed a much longer default timeout to get some tests to pass than
+      # when running locally.
+      - docker run --network host -e CYPRESS_baseUrl=$APP_TEST_URL:$APP_TEST_PORT -e CYPRESS_defaultCommandTimeout=10000 cypress:staging
+      - docker-compose -f docker-compose-staging.yml down
+    volumes:
+      - name: docker
+        path: /var/run/docker.sock
+
+  # Notify Telegram that tests are passed
+  - name: telgram_notify
+    image: appleboy/drone-telegram
+    when:
+      status:
+        - success
+        - failure
+    settings:
+      # The secrets below can be entered from the Drone UI for this repo
+      token:
+        from_secret: telegram_token
+      to:
+        from_secret: telegram_chat_id
+      format: markdown
+      message: >
+        {{#success build.status}}
+        ✅ Build #{{build.number}} of `{{repo.name}}` succeeded.
+        📝 Commit by {{commit.author}} on `{{commit.branch}}`:
+        ```
+        {{commit.message}}
+        ```
+        🌐 {{ build.link }}
+        {{else}}
+        ❌ Build #{{build.number}} of `{{repo.name}}` failed.
+        📝 Commit by {{commit.author}} on `{{commit.branch}}`:
+        ```
+        {{commit.message}}
+        ```
+        🌐 {{ build.link }}
+        {{/success}}
+volumes:
+  - name: docker
+    host:
+      path: /var/run/docker.sock
+  - name: pip_cache
+    host:
+      path: /tmp/cache/drone/pip
+  - name: node_cache
+    host:
+      path: /tmp/cache/drone/node_modules
+
+services:
+  # This database stays running during the whole pipeline and can be accessed from any of the
+  # other steps.
+  - name: gamedb
+    image: postgres:11.1-alpine
+    ports:
+    - 5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: game_test
