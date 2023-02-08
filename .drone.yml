@@ -1,33 +1,10 @@
+---
 kind: pipeline
-type: docker
-name: pizzahut
+name: testing
 
 steps:
-  - name: host         
-    image: alpine         
-    commands:                 
-      - cat /etc/hosts
-    when:                          
-      status: [ success, failure ]
-
-  - name: echo                    
-    image: plugins/git            
-    commands:               
-    - echo "78523"
-    when:                      
-      branch:
-      - main
-  # 事件三
-  - name: dev_action         
-    image: plugins/git        
-    commands:                  
-    - echo "111111"
-    when:                  
-      branch:
-      - main
-
-trigger:
-  branch: 
-  - main
-  event:
-  - push
+- name: backend
+  image: golang:1.15
+  commands:
+    - go build
+    - go test
