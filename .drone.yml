@@ -1,6 +1,6 @@
 kind: pipeline
 type: docker
-name: clone
+name: pizzahut
 
 steps:
   - name: host         
