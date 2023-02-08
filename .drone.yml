@@ -16,7 +16,7 @@ steps:
     - echo "78523"
     when:                      
       branch:
-      - master
+      - main
   # 事件三
   - name: dev_action         
     image: plugins/git        
@@ -24,7 +24,7 @@ steps:
     - echo "111111"
     when:                  
       branch:
-      - develop
+      - main
 
 trigger:
   branch: 
