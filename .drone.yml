@@ -1,10 +1,19 @@
----
 kind: pipeline
-name: testing
+type: docker
+name: default
 
 steps:
-- name: backend
-  image: golang:1.15
-  commands:
-    - go build
-    - go test
+  - name: self-plugin
+    image: neil605164/drone-plugin-ex
+    settings:
+      hello: "Wow"
+    commands:
+    - echo $PLUGIN_HELLO                 
+    when:
+      branch:
+      - main
+trigger:
+  branch: 
+  - main
+  event:
+  - push
